@@ -12,6 +12,12 @@ Google Cloud offers an official free credit tier (including allowances for Text 
 - **Use the official Google Places API** if you are building mission-critical client pipelines, need automated live production services, high throughput, SLA guarantees, or official data licensing.
 - **Use this tool** for quick ad-hoc reconnaissance, local prospecting, or one-off exploratory scraping where setting up GCP billing accounts and managing API keys is overkill.
 
+### Known Limitations & Operational Considerations
+
+- **Google Limited View**: Unauthenticated headless sessions receive Google's guest/lightweight DOM view, where secondary fields (e.g. secondary links or unverified phones) may be withheld by Google. Blank fields often reflect Google's missing data rather than extraction failure.
+- **No Residential Proxy / CAPTCHA Solver**: The tool operates directly over your local connection. It is tuned for small-to-medium ad-hoc batches (<100 listings).
+- **API Alternative**: For high-volume, mission-critical pipelines, Google Places API provides 5,000 monthly free tier requests.
+
 ---
 
 ## Key Features

@@ -55,6 +55,19 @@ def test_coordinate_parsing_invalid_url():
 
     assert parse_coordinates_from_url("") == (None, None)
 
+def test_coordinate_parsing_order_agnostic():
+    """
+    Assert that parse_coordinates_from_url correctly extracts coordinates
+    when !4d (longitude) appears before !3d (latitude) in the URL.
+    """
+    url_lng_before_lat = (
+        "https://www.google.com/maps/place/Custom+Shop/@3.1390,101.6869,15z"
+        "/data=!4m6!3m5!1s0x0:0x0!8m2!4d101.6868550!3d3.1390030!16s%2Fg%2F11test"
+    )
+    lat, lng = parse_coordinates_from_url(url_lng_before_lat)
+    assert lat == pytest.approx(3.1390030)
+    assert lng == pytest.approx(101.6868550)
+
 def test_is_valid_business_rejects_administrative_locality_cards():
     """
     Test 2: Locality filter: assert that is_valid_business() rejects locality cards
@@ -113,32 +126,22 @@ def test_is_valid_business_rejects_administrative_locality_cards():
     )
     assert not is_valid_business(empty_details)
 
-def test_is_valid_business_accepts_valid_businesses():
-    """Valid business with rating/reviews, phone, or commercial category."""
-    # Has rating & reviews
-    business_with_rating = BusinessPlace(
-        name="The Daily Drip",
-        category="Coffee shop",
-        rating=4.7,
-        reviews_count=120,
-        phone="+1 206-555-0100",
-        address="123 Pike St, Seattle, WA"
-    )
-    assert is_valid_business(business_with_rating)
-
-    # No rating or reviews, but has phone number
-    business_with_phone = BusinessPlace(
-        name="Edinburgh Rare Books",
-        category="",
+def test_is_valid_business_rejects_ghost_listings():
+    """
+    Assert that ghost/abandoned listings with a valid category (e.g. 'Car wash')
+    but NO rating, NO review count, and NO phone number are rejected.
+    """
+    ghost_car_wash = BusinessPlace(
+        name="Petaling jaya",
+        category="Car wash",
         rating=None,
         reviews_count=None,
-        phone="+44 131 555 0199",
-        address="45 High St, Edinburgh, UK"
+        phone="",
+        address="Petaling Jaya, Selangor"
     )
-    assert is_valid_business(business_with_phone)
+    assert not is_valid_business(ghost_car_wash)
 
-    # Commercial category with address even if phone and rating are absent
-    business_with_category = BusinessPlace(
+    ghost_art_gallery = BusinessPlace(
         name="Galleria dell'Arte",
         category="Art gallery",
         rating=None,
@@ -146,7 +149,63 @@ def test_is_valid_business_accepts_valid_businesses():
         phone="",
         address="Via dei Cerchi 8, Florence, Italy"
     )
-    assert is_valid_business(business_with_category)
+    assert not is_valid_business(ghost_art_gallery)
+
+    ghost_whitespace_phone = BusinessPlace(
+        name="Abandoned Bakery",
+        category="Bakery",
+        rating=None,
+        reviews_count=None,
+        phone="   ",
+        address="123 High St"
+    )
+    assert not is_valid_business(ghost_whitespace_phone)
+
+def test_is_valid_business_accepts_valid_businesses():
+    """Valid business with credible signals (rating, review count, or phone)."""
+    # Has rating & reviews & phone
+    business_full = BusinessPlace(
+        name="The Daily Drip",
+        category="Coffee shop",
+        rating=4.7,
+        reviews_count=120,
+        phone="+1 206-555-0100",
+        address="123 Pike St, Seattle, WA"
+    )
+    assert is_valid_business(business_full)
+
+    # Place with phone but no rating is accepted
+    business_with_phone_no_rating = BusinessPlace(
+        name="Edinburgh Rare Books",
+        category="Bookstore",
+        rating=None,
+        reviews_count=None,
+        phone="+44 131 555 0199",
+        address="45 High St, Edinburgh, UK"
+    )
+    assert is_valid_business(business_with_phone_no_rating)
+
+    # Place with rating but no phone is accepted
+    business_with_rating_no_phone = BusinessPlace(
+        name="Seattle Roasters",
+        category="Coffee shop",
+        rating=4.5,
+        reviews_count=50,
+        phone="",
+        address="100 Pine St, Seattle, WA"
+    )
+    assert is_valid_business(business_with_rating_no_phone)
+
+    # Place with reviews_count but no rating and no phone is accepted
+    business_with_reviews_only = BusinessPlace(
+        name="Corner Bistro",
+        category="Restaurant",
+        rating=None,
+        reviews_count=15,
+        phone="",
+        address="12 Market St"
+    )
+    assert is_valid_business(business_with_reviews_only)
 
 def test_build_search_url_with_and_without_country():
     """

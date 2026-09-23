@@ -88,17 +88,19 @@ def handle_consent(page: Page):
 def parse_coordinates_from_url(url: str) -> Tuple[Optional[float], Optional[float]]:
     """
     Extracts coordinates from Google Maps URLs.
-    Prioritizes actual business pin coordinates (!3d<lat>!4d<lng>) over
-    viewport/camera coordinates (@<lat>,<lng>).
+    Prioritizes actual business pin coordinates (!3d<lat> and !4d<lng>) over
+    viewport/camera coordinates (@<lat>,<lng>). Uses independent regex searches
+    so extraction is order-agnostic.
     """
     if not url:
         return None, None
 
-    # 1. Exact place pin coordinates (!3d<lat>!4d<lng>)
-    pin_match = re.search(r'!3d(-?\d+(?:\.\d+)?).*?!4d(-?\d+(?:\.\d+)?)', url)
-    if pin_match:
+    # 1. Exact place pin coordinates (!3d<lat> and !4d<lng>, order-agnostic)
+    lat_match = re.search(r'!3d(-?\d+\.\d+)', url)
+    lng_match = re.search(r'!4d(-?\d+\.\d+)', url)
+    if lat_match and lng_match:
         try:
-            return float(pin_match.group(1)), float(pin_match.group(2))
+            return float(lat_match.group(1)), float(lng_match.group(1))
         except ValueError:
             pass
 
@@ -118,38 +120,30 @@ def is_valid_business(place: BusinessPlace) -> bool:
     Validates whether an extracted place is an actual commercial business listing
     rather than an administrative locality, geographic boundary, or empty suggestion card.
 
-    A valid business must have either:
-    - A rating or review count, OR
-    - A phone number, OR
-    - A commercial category (excluding administrative labels like City, Town, District,
-      Administrative area, Metropolitan area, Country, or completely empty fields across
-      name/phone/rating/address).
+    A valid business must:
+    - Have a non-empty name.
+    - Not be an administrative category (e.g. City, Town, District, etc.).
+    - Have at least one credible signal: rating, review count, or phone number.
+      Listings with no rating, no reviews count, and no phone are rejected as
+      ghost/abandoned stub listings.
     """
     if not place or not place.name or not place.name.strip():
         return False
 
-    # Check for rating or reviews count
-    if place.rating is not None or place.reviews_count is not None:
-        return True
-
-    # Check for valid phone number
-    if place.phone and place.phone.strip():
-        return True
-
-    # Check commercial category
+    # Reject administrative categories
     cat = place.category.strip().lower() if place.category else ""
-    if cat and cat not in ADMIN_CATEGORIES:
-        has_substantive_info = bool(
-            place.address.strip()
-            or place.website.strip()
-            or (place.phone and place.phone.strip())
-            or place.rating is not None
-            or place.reviews_count is not None
-        )
-        if has_substantive_info:
-            return True
+    if cat in ADMIN_CATEGORIES:
+        return False
 
-    return False
+    # Check for credible signal: rating, reviews count, or phone number
+    has_rating = place.rating is not None
+    has_reviews = place.reviews_count is not None
+    has_phone = bool(place.phone and place.phone.strip())
+
+    if not has_rating and not has_reviews and not has_phone:
+        return False
+
+    return True
 
 
 def build_search_url(query: str, country: Optional[str] = None) -> str:
@@ -333,14 +327,13 @@ def scrape_google_maps(
             logging.info("Scrolling feed to discover listings...")
             stuck_count = 0
             prev_links_count = 0
-            discovery_target = max(total, int(total * 1.5))
 
             while True:
                 place_links = page.locator('a[href*="/maps/place/"]').all()
                 count = len(place_links)
                 logging.info(f"Discovered {count} listing links (target: {total})")
 
-                if count >= discovery_target:
+                if count >= total:
                     break
                 if count == prev_links_count:
                     stuck_count += 1
@@ -376,6 +369,9 @@ def scrape_google_maps(
                     if is_valid_business(place_data):
                         results.append(place_data)
                         logging.info(f"  -> Extracted: {place_data.name} | Cat: {place_data.category} | Rating: {place_data.rating} ({place_data.reviews_count}) | Phone: {place_data.phone}")
+                        if len(results) >= total:
+                            logging.info(f"Target of {total} valid businesses reached. Concluding scrape.")
+                            break
                     else:
                         logging.info(f"  -> Skipped non-business card: {place_data.name} ({place_data.category})")
 
